@@ -46,8 +46,10 @@ class CreativeFreedomTests(unittest.TestCase):
 
         creative_css = self.site / "assets" / "visual" / "forge.css"
         creative_js = self.site / "assets" / "visual" / "field-grid.mjs"
-        self.assertNotEqual(digest(creative_css), digest(REPO_ROOT / "public" / "assets" / "css" / "site.css"))
-        self.assertNotEqual(digest(creative_js), digest(REPO_ROOT / "public" / "assets" / "js" / "site.js"))
+        # Owner designs may replace every starter asset in mutable public/.
+        baseline = REPO_ROOT / "tests" / "fixtures" / "valid-site"
+        self.assertNotEqual(digest(creative_css), digest(baseline / "assets" / "css" / "site.css"))
+        self.assertNotEqual(digest(creative_js), digest(baseline / "assets" / "js" / "site.js"))
         self.assertTrue((self.site / "assets" / "fonts" / "arc-sentinel.svg").is_file())
         self.assertTrue((self.site / "assets" / "visual" / "arc-mark.svg").is_file())
         self.assertTrue((self.site / "capabilities" / "field-systems.html").is_file())

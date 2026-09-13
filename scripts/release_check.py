@@ -19,6 +19,19 @@ def run(label: str, command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, check=True, env=environment)
 
 
+def validate_public_site(python: str) -> None:
+    manifest = json.loads((ROOT / "public/site-manifest.json").read_text(encoding="utf-8"))
+    stage = manifest.get("stage") if isinstance(manifest, dict) else None
+    if stage not in {"starter", "production"}:
+        raise ValueError("public/site-manifest.json must declare stage 'starter' or 'production'.")
+    # Stage is only a routing hint: both paths run the complete site validator.
+    # Claiming starter status also requires the exact reviewed shell digest;
+    # changing the label to production cannot bypass the production gates.
+    run(f"Validate {stage} public site", [python, "scripts/validate_site.py", "public", "--mode", stage, "--repo-root", "."])
+    if stage == "starter":
+        run("Verify exact reviewed starter tree", [python, "scripts/verify_starter_tree.py", "public", "--repo-root", "."])
+
+
 def main() -> int:
     python = sys.executable
     for path in sorted((ROOT / "scripts").glob("*.py")):
@@ -35,8 +48,7 @@ def main() -> int:
     if generated:
         raise RuntimeError("Generated Python cache files must not ship: " + ", ".join(generated))
     run("Python unit tests", [python, "-m", "unittest", "discover", "-s", "tests", "-v"])
-    run("Validate starter public site", [python, "scripts/validate_site.py", "public", "--mode", "starter", "--repo-root", "."])
-    run("Verify exact reviewed starter tree", [python, "scripts/verify_starter_tree.py", "public", "--repo-root", "."])
+    validate_public_site(python)
     run("Validate production test fixture", [python, "scripts/validate_site.py", "tests/fixtures/valid-site", "--mode", "production", "--repo-root", "."])
     if shutil.which("node"):
         run("Pages middleware syntax", ["node", "--check", "functions/api/_middleware.js"])

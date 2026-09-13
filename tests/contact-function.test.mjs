@@ -455,7 +455,7 @@ test('HTML escapes inquiry text and strips referring-page query strings', async 
     assert.ok(payload.html.includes('&lt;script&gt;'));
     assert.ok(!payload.html.includes('<script>'));
     assert.ok(!payload.text.includes('customer=private'));
-    assert.ok(mock.calls.every(({ options }) => options.redirect === 'error' && options.signal instanceof AbortSignal));
+    assert.ok(mock.calls.every(({ options }) => options.redirect === 'manual' && options.signal instanceof AbortSignal));
   } finally { mock.restore(); }
 });
 
@@ -479,7 +479,7 @@ test('approved webhook gets a bounded request with redirect following disabled',
   };
   try {
     assert.equal((await onRequestPost({ request: requestFrom(validFields), env: { ...baseEnv, FORM_DELIVERY_PROVIDER: 'webhook', FORM_WEBHOOK_URL: 'https://webhook.test/form', FORM_WEBHOOK_SECRET: 'private-secret' } })).status, 200);
-    assert.equal(webhook.redirect, 'error');
+    assert.equal(webhook.redirect, 'manual');
     assert.ok(webhook.signal instanceof AbortSignal);
   } finally { globalThis.fetch = original; }
 });
@@ -521,4 +521,36 @@ for (const fail of [false, true]) {
     assert.equal(response.headers.get('x-robots-tag'), 'noindex');
     assert.match(response.headers.get('content-security-policy'), /default-src 'none'/);
   });
+}
+
+
+for (const redirectStatus of [301, 302, 303, 307, 308]) {
+  for (const stage of ['turnstile', 'email', 'webhook']) {
+    test(`${stage} HTTP ${redirectStatus} fails closed without a follow-up request`, async () => {
+      const original = globalThis.fetch;
+      const calls = [];
+      globalThis.fetch = async (url, options) => {
+        const target = String(url);
+        calls.push({ target, options });
+        // Model the actual edge runtime: redirect:error is unsupported.
+        if (!['follow', 'manual'].includes(options.redirect)) throw new TypeError('Invalid redirect value');
+        assert.equal(options.redirect, 'manual');
+        assert.ok(!target.includes('redirect-target.test'));
+        if (target.includes('/siteverify') && stage !== 'turnstile') {
+          return Response.json({ success: true, hostname: baseEnv.TURNSTILE_EXPECTED_HOSTNAME, action: baseEnv.TURNSTILE_EXPECTED_ACTION });
+        }
+        return new Response('Do not forward this request', { status: redirectStatus, headers: { Location: 'https://redirect-target.test/collect' } });
+      };
+      const env = stage === 'webhook'
+        ? { ...baseEnv, FORM_DELIVERY_PROVIDER: 'webhook', FORM_WEBHOOK_URL: 'https://webhook.test/form', FORM_WEBHOOK_SECRET: 'private-secret' }
+        : baseEnv;
+      try {
+        const response = await onRequestPost({ request: requestFrom(validFields), env });
+        assert.equal(response.status, stage === 'turnstile' ? 400 : 502);
+        assert.equal((await response.json()).ok, false);
+        assert.equal(calls.length, stage === 'turnstile' ? 1 : 2);
+        assert.ok(calls.every(call => !call.target.includes('redirect-target.test')));
+      } finally { globalThis.fetch = original; }
+    });
+  }
 }

@@ -230,10 +230,14 @@ async function verifyTurnstile(token, request, env) {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: payload,
-    redirect: "error",
+    // Workers supports manual redirects; reject non-2xx below without forwarding secrets.
+    redirect: "manual",
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   });
-  if (!result.ok) return { success: false };
+  if (!result.ok) {
+    await result.body?.cancel().catch(() => {});
+    return { success: false };
+  }
   const verification = await boundedJson(result);
   if (!verification || typeof verification !== "object" || verification.success !== true) {
     return { success: false };
@@ -322,7 +326,8 @@ async function deliverCloudflareEmail(submission, env) {
   const subjectPrefix = safeLine(env.FORM_SUBJECT_PREFIX || "Estimate request", 80);
   const result = await fetch(endpoint, {
     method: "POST",
-    redirect: "error",
+    // Workers supports manual redirects; reject non-2xx below without forwarding secrets.
+    redirect: "manual",
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     headers: {
       authorization: `Bearer ${env.CLOUDFLARE_EMAIL_API_TOKEN}`,
@@ -363,7 +368,8 @@ async function deliverWebhook(submission, env) {
   if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash) throw new Error("WEBHOOK_NOT_CONFIGURED");
   const result = await fetch(endpoint.href, {
     method: "POST",
-    redirect: "error",
+    // Workers supports manual redirects; reject non-2xx below without forwarding secrets.
+    redirect: "manual",
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     headers: {
       "content-type": "application/json",
